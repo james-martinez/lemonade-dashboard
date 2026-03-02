@@ -9,15 +9,60 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:lemonadeDashboard"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "lemonade-dashboard.helloWorld",
-        "title": "Hello World"
+        "command": "lemonade.openSettings",
+        "title": "Lemonade: Server Settings",
+        "icon": "$(settings-gear)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "lemonade.openSettings",
+          "when": "view == lemonadeDashboard",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Lemonade Server",
+      "properties": {
+        "lemonade.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "The full URL of your Lemonade server (e.g., http://127.0.0.1:8000)"
+        },
+        "lemonade.apiToken": {
+          "type": "string",
+          "default": "",
+          "description": "API Token (LEMONADE_API_KEY) for authentication"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lemonade-explorer",
+          "title": "Lemonade",
+          "icon": "media/lemon.svg"
+        }
+      ]
+    },
+    "views": {
+      "lemonade-explorer": [
+        {
+          "type": "webview",
+          "id": "lemonadeDashboard",
+          "name": "Manager"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
