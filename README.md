@@ -2,6 +2,8 @@
 
 A management dashboard for Lemonade Server. This extension provides a visual interface to manage your Lemonade models, backends, and system settings directly within VS Code.
 
+![Lemonade Dashboard](media/screenshot.png)
+
 ## Features
 
 - **Model Management**: View, download, and manage AI models.
