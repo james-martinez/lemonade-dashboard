@@ -13,7 +13,7 @@
     "vscode": "^1.109.0"
   },
   "categories": [
-    "Other"
+    "Machine Learning"
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
