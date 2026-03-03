@@ -1,5 +1,6 @@
 {
   "name": "lemonade-dashboard",
+  "publisher": "JamesMartinez",
   "displayName": "Lemonade Dashboard",
   "description": "A management dashboard for Lemonade Server",
   "version": "0.0.1",
