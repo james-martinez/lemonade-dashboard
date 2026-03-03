@@ -628,7 +628,12 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
 
                     document.getElementById('chatInput').addEventListener('keydown', (e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
                             sendChat();
+                            // Ensure the input stays cleared and focused after send
+                            const input = document.getElementById('chatInput');
+                            input.value = '';
+                            input.focus();
                         }
                     });
 
