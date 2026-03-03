@@ -3,6 +3,10 @@
   "displayName": "Lemonade Dashboard",
   "description": "A management dashboard for Lemonade Server",
   "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/james-martinez/lemonade-dashboard.git"
+  },
   "icon": "media/lemon.png",
   "engines": {
     "vscode": "^1.109.0"
