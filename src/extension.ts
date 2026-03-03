@@ -81,19 +81,6 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     vscode.commands.executeCommand('workbench.action.openSettings', 'lemonade');
                     break;
 
-                case 'getLogs':
-                    try {
-                        const res = await fetch(`${rawUrl}/logs`, { headers });
-                        if (!res.ok) throw new Error("Failed to fetch logs");
-                        const logsData = await res.json();
-                        webviewView.webview.postMessage({
-                            type: 'renderLogs',
-                            logs: logsData.logs || logsData || []
-                        });
-                    } catch (e) {
-                        webviewView.webview.postMessage({ type: 'logsError', error: e.message });
-                    }
-                    break;
 
                 case 'getDashboardData':
                     try {
@@ -129,7 +116,8 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             websocketPort: healthData.websocket_port || null,
                             allModelsLoaded: healthData.all_models_loaded || [],
                             maxModels: healthData.max_models || {},
-                            stats: statsData
+                            stats: statsData,
+                            healthData: healthData
                         });
                     } catch (e) {
                         updateStatusBar(false);
@@ -143,7 +131,10 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         const res = await fetch(`${apiUrl}${endpoint}`, {
                             method: 'POST',
                             headers,
-                            body: JSON.stringify({ model_name: data.modelName })
+                            body: JSON.stringify({
+                                model_name: data.modelName,
+                                context_size: data.contextSize || 4096
+                            })
                         });
                         if (!res.ok) throw new Error("Action failed");
                         vscode.window.showInformationMessage(`Successfully ${data.action}ed ${data.modelName}`);
@@ -283,8 +274,9 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                 <vscode-panels>
                     <vscode-panel-tab id="tab-1">Main</vscode-panel-tab>
                     <vscode-panel-tab id="tab-2">System</vscode-panel-tab>
-                    <vscode-panel-tab id="tab-3">Library</vscode-panel-tab>
-                    <vscode-panel-tab id="tab-4">Backends</vscode-panel-tab>
+                    <vscode-panel-tab id="tab-3">Health</vscode-panel-tab>
+                    <vscode-panel-tab id="tab-4">Library</vscode-panel-tab>
+                    <vscode-panel-tab id="tab-5">Backends</vscode-panel-tab>
 
                     <!-- Main Tab: Loaded Models and Last Request Stats -->
                     <vscode-panel-view id="view-1" style="flex-direction: column;">
@@ -306,18 +298,13 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             <vscode-dropdown id="modelSelect">
                                 <vscode-option value="">Fetching models...</vscode-option>
                             </vscode-dropdown>
+                            <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                                <vscode-text-field id="contextSize" placeholder="Context size eg. 4096" style="flex: 1;"></vscode-text-field>
+                            </div>
                             <div class="button-group">
                                 <vscode-button appearance="primary" onclick="manageModel('load')">Load to VRAM</vscode-button>
                                 <vscode-button appearance="secondary" onclick="manageModel('unload')">Unload</vscode-button>
                             </div>
-                        </div>
-
-                        <vscode-divider></vscode-divider>
-
-                        <div class="section">
-                            <h3>System Logs</h3>
-                            <div id="logsContainer" style="font-size: 11px; font-family: var(--vscode-editor-font-family); background: var(--vscode-input-background); padding: 8px; border-radius: 3px; max-height: 150px; overflow-y: auto; color: var(--vscode-editor-foreground);"></div>
-                            <vscode-button appearance="secondary" onclick="refreshLogs()">Refresh Logs</vscode-button>
                         </div>
                     </vscode-panel-view>
 
@@ -354,8 +341,15 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
 
                     <vscode-panel-view id="view-3" style="flex-direction: column;">
                         <div class="section">
+                            <h3>Server Health</h3>
+                            <pre id="healthJson" style="font-size: 11px; font-family: var(--vscode-editor-font-family); background: var(--vscode-input-background); padding: 12px; border-radius: 3px; max-height: 300px; overflow-y: auto; color: var(--vscode-editor-foreground); white-space: pre-wrap; word-wrap: break-word;"></pre>
+                        </div>
+                    </vscode-panel-view>
+
+                    <vscode-panel-view id="view-4" style="flex-direction: column;">
+                        <div class="section">
                             <h3>Pull New Model</h3>
-                            <vscode-text-field id="pullInput" placeholder="e.g., Qwen/Qwen2.5-Coder-7B-Instruct-GGUF">
+                            <vscode-text-field id="pullInput" placeholder="e.g., unsloth/Qwen3.5-27B-GGUF:UD-Q8_K_XL">
                                 HuggingFace Repo ID
                             </vscode-text-field>
                             <vscode-button appearance="primary" onclick="pullModel()">Download Model</vscode-button>
@@ -374,7 +368,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         </div>
                     </vscode-panel-view>
 
-                    <vscode-panel-view id="view-4" style="flex-direction: column;">
+                    <vscode-panel-view id="view-5" style="flex-direction: column;">
                         <div class="section">
                             <h3>Manage Recipes</h3>
                             <vscode-text-field id="recipeInput" placeholder="e.g., llamacpp:vulkan">
@@ -402,11 +396,11 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
 
                     function requestDashboardData() { vscode.postMessage({ type: 'getDashboardData' }); }
                     function openSettings() { vscode.postMessage({ type: 'openSettings' }); }
-                    function refreshLogs() { vscode.postMessage({ type: 'getLogs' }); }
                     
                     function manageModel(action) {
                         const modelName = document.getElementById('modelSelect').value;
-                        if (modelName) vscode.postMessage({ type: 'manageModelLifecycle', action, modelName });
+                        const contextSize = document.getElementById('contextSize').value || '4096';
+                        if (modelName) vscode.postMessage({ type: 'manageModelLifecycle', action, modelName, contextSize: parseInt(contextSize) });
                     }
                     function pullModel() {
                         const modelName = document.getElementById('pullInput').value;
@@ -434,16 +428,16 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             
                             // Server info
                             document.getElementById('serverVersion').innerText = msg.serverVersion || '-';
-                            document.getElementById('wsPort').innerText = msg.websocketPort ? \`\${msg.websocketPort}\` : '-';
+                            document.getElementById('wsPort').innerText = msg.websocketPort ? String(msg.websocketPort) : '-';
                             
                             // Stats
                             const tps = msg.stats?.tokens_per_second || 0;
-                            document.getElementById('speedBadge').innerText = \`\${tps.toFixed(1)} t/s\`;
-                            document.getElementById('ttft').innerText = \`\${msg.stats?.time_to_first_token?.toFixed(2) || 0}s\`;
-                            document.getElementById('tps').innerText = \`\${tps.toFixed(1)}\`;
-                            document.getElementById('inputTokens').innerText = \`\${msg.stats?.input_tokens || 0}\`;
-                            document.getElementById('outputTokens').innerText = \`\${msg.stats?.output_tokens || 0}\`;
-                            document.getElementById('promptTokens').innerText = \`\${msg.stats?.prompt_tokens || 0}\`;
+                            document.getElementById('speedBadge').innerText = tps.toFixed(1) + ' t/s';
+                            document.getElementById('ttft').innerText = (msg.stats?.time_to_first_token?.toFixed(2) || 0) + 's';
+                            document.getElementById('tps').innerText = tps.toFixed(1);
+                            document.getElementById('inputTokens').innerText = String(msg.stats?.input_tokens || 0);
+                            document.getElementById('outputTokens').innerText = String(msg.stats?.output_tokens || 0);
+                            document.getElementById('promptTokens').innerText = String(msg.stats?.prompt_tokens || 0);
                             
                             const decodeTimes = msg.stats?.decode_token_times;
                             document.getElementById('decodeTimes').innerText = decodeTimes && decodeTimes.length > 0
@@ -463,17 +457,17 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             // Loaded models
                             if (msg.allModelsLoaded && msg.allModelsLoaded.length > 0) {
                                 const loadedHtml = msg.allModelsLoaded.map(m =>
-                                    \`<div style="margin-bottom: 6px;">
-                                        <strong>\${m.model_name}</strong> (\${m.type})<br>
-                                        <span style="opacity: 0.7;">Device: \${m.device || 'N/A'} | Recipe: \${m.recipe || 'N/A'}</span>
-                                    </div>\`
+                                    '<div style="margin-bottom: 6px;">' +
+                                        '<strong>' + escapeHtml(m.model_name) + '</strong> (' + (m.type || '') + ')<br>' +
+                                        '<span style="opacity: 0.7;">Device: ' + (m.device || 'N/A') + ' | Recipe: ' + (m.recipe || 'N/A') + '</span>' +
+                                    '</div>'
                                 ).join('');
                                 document.getElementById('loadedModelsList').innerHTML = loadedHtml;
                             } else {
                                 document.getElementById('loadedModelsList').innerText = 'No models loaded';
                             }
 
-                            const modelOptions = msg.models.map(m => \`<vscode-option value="\${m.id}">\${m.id}</vscode-option>\`).join('') || '<vscode-option value="">No models found</vscode-option>';
+                            const modelOptions = msg.models.map(m => '<vscode-option value="' + escapeHtml(String(m.id)) + '">' + escapeHtml(String(m.id)) + '</vscode-option>').join('') || '<vscode-option value="">No models found</vscode-option>';
                             document.getElementById('modelSelect').innerHTML = modelOptions;
                             document.getElementById('deleteSelect').innerHTML = modelOptions;
 
@@ -492,7 +486,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                 if (msg.sysInfo.recipes) {
                                     const recipeNames = Object.keys(msg.sysInfo.recipes);
                                     document.getElementById('recipeContainer').innerHTML = recipeNames.length > 0
-                                        ? recipeNames.map(r => \`<span class="recipe-item">\${r}</span>\`).join('')
+                                        ? recipeNames.map(r => '<span class="recipe-item">' + escapeHtml(r) + '</span>').join('')
                                         : 'No recipe data found.';
                                 }
                             }
@@ -530,26 +524,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             document.getElementById('deleteSelect').innerHTML = '<vscode-option value="">Fetching...</vscode-option>';
                             document.getElementById('recipeContainer').innerHTML = 'Offline';
                             
-                            document.getElementById('logsContainer').innerHTML = '<span style="opacity: 0.5;">Logs unavailable</span>';
-                        } else if (msg.type === 'renderLogs') {
-                            const logs = msg.logs;
-                            if (logs && logs.length > 0) {
-                                const logsHtml = logs.map(log => {
-                                    const timestamp = log.timestamp || log.ts || log.time || new Date().toISOString();
-                                    const level = log.level || log.log_level || 'INFO';
-                                    const message = log.message || log.msg || log.text || '';
-                                    return `<div style="margin-bottom: 4px; padding: 2px 4px; border-bottom: 1px solid var(--vscode-widget-border);">
-                                        <span style="opacity: 0.6; font-size: 10px;">${timestamp}</span>
-                                        <span style="display: inline-block; width: 40px; margin-left: 4px; padding: 1px 3px; border-radius: 2px; font-size: 9px; background: ${getLogLevelColor(level)}; color: white;">${level}</span>
-                                        <span style="margin-left: 6px;">${escapeHtml(message)}</span>
-                                    </div>`;
-                                }).join('');
-                                document.getElementById('logsContainer').innerHTML = logsHtml;
-                            } else {
-                                document.getElementById('logsContainer').innerHTML = '<span style="opacity: 0.5;">No logs available</span>';
-                            }
-                        } else if (msg.type === 'logsError') {
-                            document.getElementById('logsContainer').innerHTML = `<span style="color: var(--vscode-errorForeground);">Error: ${escapeHtml(msg.error)}</span>`;
+                            document.getElementById('healthJson').innerText = JSON.stringify(msg.healthData || {}, null, 2);
                         }
                     });
                     
@@ -570,7 +545,6 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     
                     requestDashboardData();
                     setInterval(requestDashboardData, 3000);
-                    setInterval(refreshLogs, 5000);
                 </script>
             </body>
             </html>
