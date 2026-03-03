@@ -81,6 +81,20 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     vscode.commands.executeCommand('workbench.action.openSettings', 'lemonade');
                     break;
 
+                case 'getLogs':
+                    try {
+                        const res = await fetch(`${rawUrl}/logs`, { headers });
+                        if (!res.ok) throw new Error("Failed to fetch logs");
+                        const logsData = await res.json();
+                        webviewView.webview.postMessage({
+                            type: 'renderLogs',
+                            logs: logsData.logs || logsData || []
+                        });
+                    } catch (e) {
+                        webviewView.webview.postMessage({ type: 'logsError', error: e.message });
+                    }
+                    break;
+
                 case 'getDashboardData':
                     try {
                         const liveRes = await fetch(`${rawUrl}/live`, { headers });
@@ -129,7 +143,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         const res = await fetch(`${apiUrl}${endpoint}`, {
                             method: 'POST',
                             headers,
-                            body: JSON.stringify({ model: data.modelName })
+                            body: JSON.stringify({ model_name: data.modelName })
                         });
                         if (!res.ok) throw new Error("Action failed");
                         vscode.window.showInformationMessage(`Successfully ${data.action}ed ${data.modelName}`);
@@ -141,12 +155,40 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                 case 'pullModel':
                     vscode.window.showInformationMessage(`Pulling model: ${data.modelName}...`);
                     try {
-                        const res = await fetch(`${apiUrl}/pull`, {
+                        const res = await fetch(`${apiUrl}/pull?stream=true`, {
                             method: 'POST',
                             headers,
-                            body: JSON.stringify({ model: data.modelName })
+                            body: JSON.stringify({ model_name: data.modelName })
                         });
-                        if (!res.ok) throw new Error("Pull failed");
+                        if (!res.ok || !res.body) throw new Error("Pull failed");
+                
+                        const reader = res.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+                
+                        while (true) {
+                            const { value, done } = await reader.read();
+                            if (done) break;
+                            buffer += decoder.decode(value, { stream: true });
+                
+                            const events = buffer.split('\\n\\n');
+                            buffer = events.pop() || '';
+                
+                            for (const evt of events) {
+                                if (evt.includes('event: progress')) {
+                                    const dataLine = evt.split('\\n').find(l => l.startsWith('data:'));
+                                    if (dataLine) {
+                                        const payload = JSON.parse(dataLine.replace('data:', '').trim());
+                                        webviewView.webview.postMessage({
+                                            type: 'pullProgress',
+                                            model: data.modelName,
+                                            percent: payload.percent
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                
                         vscode.window.showInformationMessage(`Successfully pulled ${data.modelName}`);
                     } catch (e) {
                         vscode.window.showErrorMessage(`Failed to pull ${data.modelName}`);
@@ -158,7 +200,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         const res = await fetch(`${apiUrl}/delete`, {
                             method: 'POST',
                             headers,
-                            body: JSON.stringify({ model: data.modelName })
+                            body: JSON.stringify({ model_name: data.modelName })
                         });
                         if (!res.ok) throw new Error("Delete failed");
                         vscode.window.showInformationMessage(`Deleted ${data.modelName}`);
@@ -239,11 +281,48 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                 </div>
 
                 <vscode-panels>
-                    <vscode-panel-tab id="tab-1">System</vscode-panel-tab>
-                    <vscode-panel-tab id="tab-2">Library</vscode-panel-tab>
-                    <vscode-panel-tab id="tab-3">Backends</vscode-panel-tab>
+                    <vscode-panel-tab id="tab-1">Main</vscode-panel-tab>
+                    <vscode-panel-tab id="tab-2">System</vscode-panel-tab>
+                    <vscode-panel-tab id="tab-3">Library</vscode-panel-tab>
+                    <vscode-panel-tab id="tab-4">Backends</vscode-panel-tab>
 
+                    <!-- Main Tab: Loaded Models and Last Request Stats -->
                     <vscode-panel-view id="view-1" style="flex-direction: column;">
+                        <div class="section">
+                            <h3>Last Request Stats</h3>
+                            <div class="metric"><span class="metric-label">Time to First Token</span><span id="ttft" class="metric-value">0s</span></div>
+                            <div class="metric"><span class="metric-label">Tokens Per Second</span><span id="tps" class="metric-value">0</span></div>
+                            <div class="metric"><span class="metric-label">Input Tokens</span><span id="inputTokens" class="metric-value">0</span></div>
+                            <div class="metric"><span class="metric-label">Output Tokens</span><span id="outputTokens" class="metric-value">0</span></div>
+                            <div class="metric"><span class="metric-label">Prompt Tokens</span><span id="promptTokens" class="metric-value">0</span></div>
+                            <div class="metric"><span class="metric-label">Decode Times</span><span id="decodeTimes" class="metric-value">-</span></div>
+                        </div>
+
+                        <vscode-divider></vscode-divider>
+
+                        <div class="section">
+                            <h3>Loaded Models</h3>
+                            <div id="loadedModelsList" style="font-size: 12px; margin-bottom: 10px; color: var(--vscode-descriptionForeground);">No models loaded</div>
+                            <vscode-dropdown id="modelSelect">
+                                <vscode-option value="">Fetching models...</vscode-option>
+                            </vscode-dropdown>
+                            <div class="button-group">
+                                <vscode-button appearance="primary" onclick="manageModel('load')">Load to VRAM</vscode-button>
+                                <vscode-button appearance="secondary" onclick="manageModel('unload')">Unload</vscode-button>
+                            </div>
+                        </div>
+
+                        <vscode-divider></vscode-divider>
+
+                        <div class="section">
+                            <h3>System Logs</h3>
+                            <div id="logsContainer" style="font-size: 11px; font-family: var(--vscode-editor-font-family); background: var(--vscode-input-background); padding: 8px; border-radius: 3px; max-height: 150px; overflow-y: auto; color: var(--vscode-editor-foreground);"></div>
+                            <vscode-button appearance="secondary" onclick="refreshLogs()">Refresh Logs</vscode-button>
+                        </div>
+                    </vscode-panel-view>
+
+                    <!-- System Tab: Server Info, Hardware Specs, Model Limits -->
+                    <vscode-panel-view id="view-2" style="flex-direction: column;">
                         <div class="section">
                             <h3>Server Info</h3>
                             <div class="metric"><span class="metric-label">Version</span><span id="serverVersion" class="metric-value">-</span></div>
@@ -271,33 +350,9 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             <div class="metric"><span class="metric-label">Image Slots</span><span id="maxImage" class="metric-value">-</span></div>
                             <div class="metric"><span class="metric-label">TTS Slots</span><span id="maxTts" class="metric-value">-</span></div>
                         </div>
-
-                        <div class="section">
-                            <h3>Last Request Stats</h3>
-                            <div class="metric"><span class="metric-label">Time to First Token</span><span id="ttft" class="metric-value">0s</span></div>
-                            <div class="metric"><span class="metric-label">Tokens Per Second</span><span id="tps" class="metric-value">0</span></div>
-                            <div class="metric"><span class="metric-label">Input Tokens</span><span id="inputTokens" class="metric-value">0</span></div>
-                            <div class="metric"><span class="metric-label">Output Tokens</span><span id="outputTokens" class="metric-value">0</span></div>
-                            <div class="metric"><span class="metric-label">Prompt Tokens</span><span id="promptTokens" class="metric-value">0</span></div>
-                            <div class="metric"><span class="metric-label">Decode Times</span><span id="decodeTimes" class="metric-value">-</span></div>
-                        </div>
-
-                        <vscode-divider></vscode-divider>
-
-                        <div class="section">
-                            <h3>Loaded Models</h3>
-                            <div id="loadedModelsList" style="font-size: 12px; margin-bottom: 10px; color: var(--vscode-descriptionForeground);">No models loaded</div>
-                            <vscode-dropdown id="modelSelect">
-                                <vscode-option value="">Fetching models...</vscode-option>
-                            </vscode-dropdown>
-                            <div class="button-group">
-                                <vscode-button appearance="primary" onclick="manageModel('load')">Load to VRAM</vscode-button>
-                                <vscode-button appearance="secondary" onclick="manageModel('unload')">Unload</vscode-button>
-                            </div>
-                        </div>
                     </vscode-panel-view>
 
-                    <vscode-panel-view id="view-2" style="flex-direction: column;">
+                    <vscode-panel-view id="view-3" style="flex-direction: column;">
                         <div class="section">
                             <h3>Pull New Model</h3>
                             <vscode-text-field id="pullInput" placeholder="e.g., Qwen/Qwen2.5-Coder-7B-Instruct-GGUF">
@@ -319,7 +374,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         </div>
                     </vscode-panel-view>
 
-                    <vscode-panel-view id="view-3" style="flex-direction: column;">
+                    <vscode-panel-view id="view-4" style="flex-direction: column;">
                         <div class="section">
                             <h3>Manage Recipes</h3>
                             <vscode-text-field id="recipeInput" placeholder="e.g., llamacpp:vulkan">
@@ -347,6 +402,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
 
                     function requestDashboardData() { vscode.postMessage({ type: 'getDashboardData' }); }
                     function openSettings() { vscode.postMessage({ type: 'openSettings' }); }
+                    function refreshLogs() { vscode.postMessage({ type: 'getLogs' }); }
                     
                     function manageModel(action) {
                         const modelName = document.getElementById('modelSelect').value;
@@ -473,11 +529,48 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             document.getElementById('modelSelect').innerHTML = '<vscode-option value="">Fetching...</vscode-option>';
                             document.getElementById('deleteSelect').innerHTML = '<vscode-option value="">Fetching...</vscode-option>';
                             document.getElementById('recipeContainer').innerHTML = 'Offline';
+                            
+                            document.getElementById('logsContainer').innerHTML = '<span style="opacity: 0.5;">Logs unavailable</span>';
+                        } else if (msg.type === 'renderLogs') {
+                            const logs = msg.logs;
+                            if (logs && logs.length > 0) {
+                                const logsHtml = logs.map(log => {
+                                    const timestamp = log.timestamp || log.ts || log.time || new Date().toISOString();
+                                    const level = log.level || log.log_level || 'INFO';
+                                    const message = log.message || log.msg || log.text || '';
+                                    return `<div style="margin-bottom: 4px; padding: 2px 4px; border-bottom: 1px solid var(--vscode-widget-border);">
+                                        <span style="opacity: 0.6; font-size: 10px;">${timestamp}</span>
+                                        <span style="display: inline-block; width: 40px; margin-left: 4px; padding: 1px 3px; border-radius: 2px; font-size: 9px; background: ${getLogLevelColor(level)}; color: white;">${level}</span>
+                                        <span style="margin-left: 6px;">${escapeHtml(message)}</span>
+                                    </div>`;
+                                }).join('');
+                                document.getElementById('logsContainer').innerHTML = logsHtml;
+                            } else {
+                                document.getElementById('logsContainer').innerHTML = '<span style="opacity: 0.5;">No logs available</span>';
+                            }
+                        } else if (msg.type === 'logsError') {
+                            document.getElementById('logsContainer').innerHTML = `<span style="color: var(--vscode-errorForeground);">Error: ${escapeHtml(msg.error)}</span>`;
                         }
                     });
                     
+                    function getLogLevelColor(level) {
+                        const l = (level || '').toUpperCase();
+                        if (l.includes('ERR') || l === 'FATAL') return 'var(--vscode-errorForeground)';
+                        if (l.includes('WARN')) return 'var(--vscode-editorWarning-foreground)';
+                        if (l.includes('INFO')) return '#3b82f6';
+                        if (l.includes('DEBUG')) return 'var(--vscode-descriptionForeground)';
+                        return 'var(--vscode-badge-background)';
+                    }
+                    
+                    function escapeHtml(text) {
+                        const div = document.createElement('div');
+                        div.textContent = text;
+                        return div.innerHTML;
+                    }
+                    
                     requestDashboardData();
-                    setInterval(requestDashboardData, 3000); 
+                    setInterval(requestDashboardData, 3000);
+                    setInterval(refreshLogs, 5000);
                 </script>
             </body>
             </html>
