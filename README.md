@@ -1,4 +1,4 @@
-# Lemonade Dashboard
+# 🍋 Lemonade Dashboard 🍋
 
 A management dashboard for Lemonade Server. This extension provides a visual interface to manage your Lemonade models, backends, and system settings directly within VS Code.
 
