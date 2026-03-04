@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.0.4](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.3...v0.0.4) (2026-03-04)
+
+
+### Features
+
+* add pre-configured model selection to pull model view ([e50f0bf](https://github.com/james-martinez/lemonade-dashboard/commit/e50f0bf1c4fe3b0e2bdec33bd5639c493d48320c))
+
 ### [0.0.3](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.2...v0.0.3) (2026-03-04)
 
 ## [0.0.2] - 2026-03-04
