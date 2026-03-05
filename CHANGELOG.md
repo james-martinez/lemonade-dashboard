@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.0.5](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.4...v0.0.5) (2026-03-05)
+
+
+### Features
+
+* add LlamaCpp args input and save options checkbox for model loading ([cc60b1d](https://github.com/james-martinez/lemonade-dashboard/commit/cc60b1ddb51e6e15f625d8634672f51f875a5768))
+
 ### [0.0.4](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.3...v0.0.4) (2026-03-04)
 
 
