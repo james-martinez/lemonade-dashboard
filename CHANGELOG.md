@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.0.6](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.5...v0.0.6) (2026-03-06)
+
+
+### Features
+
+* add LlamaCpp backend input and refactor saved model options ([f15d12e](https://github.com/james-martinez/lemonade-dashboard/commit/f15d12e72544b2120623a5501609f5ede8fbce33))
+
 ### [0.0.5](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.4...v0.0.5) (2026-03-05)
 
 
