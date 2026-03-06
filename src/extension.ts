@@ -338,7 +338,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
 
                         // The user specified to use the v1/chat/completions endpoint
                         // and ensure the model name is included if required.
-                        const res = await fetch(`${rawUrl}/v1/chat/completions`, {
+                        const res = await fetch(`${rawUrl}/api/v1/chat/completions`, {
                             method: 'POST',
                             headers,
                             body: JSON.stringify({
