@@ -1085,7 +1085,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                     statusEl.innerText = 'Up to date';
                                     statusEl.style.color = 'var(--vscode-testing-iconPassed)';
                                 } else {
-                                    statusEl.innerHTML = 'Update available: <a href="https://github.com/lemonade-sdk/lemonade/releases/latest" style="color: var(--vscode-textLink-foreground);">' + latest + '</a>';
+                                    statusEl.innerHTML = 'Update available: <a href="https://github.com/lemonade-sdk/lemonade/releases/latest" style="color: var(--vscode-textLink-foreground);">' + escapeHtml(latest) + '</a>';
                                     statusEl.style.color = 'var(--vscode-testing-iconFailed)';
                                 }
                             }
