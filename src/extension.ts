@@ -9,7 +9,7 @@ export function activate(context: vscode.ExtensionContext) {
     statusBarItem.command = 'lemonade.openSettings'; 
     context.subscriptions.push(statusBarItem);
     
-    updateStatusBar(false);
+    updateStatusBar(statusBarItem, false);
     statusBarItem.show();
 
     context.subscriptions.push(vscode.commands.registerCommand('lemonade.openSettings', () => {
@@ -24,15 +24,15 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {}
 
-export function updateStatusBar(isConnected: boolean) {
+export function updateStatusBar(item: vscode.StatusBarItem, isConnected: boolean) {
     if (isConnected) {
-        statusBarItem.text = '$(check) Lemonade: Connected';
-        statusBarItem.tooltip = 'Lemonade Server is Online';
-        statusBarItem.backgroundColor = undefined; 
+        item.text = '$(check) Lemonade: Connected';
+        item.tooltip = 'Lemonade Server is Online';
+        item.backgroundColor = undefined;
     } else {
-        statusBarItem.text = '$(error) Lemonade: Disconnected';
-        statusBarItem.tooltip = 'Lemonade Server is Offline. Click to check settings.';
-        statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+        item.text = '$(error) Lemonade: Disconnected';
+        item.tooltip = 'Lemonade Server is Offline. Click to check settings.';
+        item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     }
 }
 
@@ -96,7 +96,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             fetch(`${apiUrl}/stats`, { headers })
                         ]);
 
-                        updateStatusBar(true);
+                        updateStatusBar(statusBarItem, true);
 
                         // FIX: Cast JSON responses to any to resolve TypeScript 'unknown' errors
                         const sysInfo = (await sysRes.json()) as any;
@@ -156,7 +156,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             console.error("Failed to fetch server_models.json", err);
                         }
                     } catch (e) {
-                        updateStatusBar(false);
+                        updateStatusBar(statusBarItem, false);
                         webviewView.webview.postMessage({ type: 'serverOffline' });
                     }
                     break;
