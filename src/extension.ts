@@ -64,6 +64,12 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private _lastLoadedModel: string | null = null;
 
+    private _cachedLatestVersion: string | null = null;
+    private _lastVersionCheckTime: number = 0;
+
+    private _cachedServerModels: any = null;
+    private _lastServerModelsCheckTime: number = 0;
+
     constructor(private readonly _extensionUri: vscode.Uri) {}
 
     public resolveWebviewView(
@@ -126,34 +132,49 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         });
 
                         // Fetch latest version from GitHub to compare
-                        try {
-                            const ghRes = await fetch('https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest', {
-                                headers: { 'User-Agent': 'Lemonade-VSCode-Extension' }
-                            });
-                            if (ghRes.ok) {
-                                const ghData = (await ghRes.json()) as any;
-                                const latestVersion = ghData.tag_name;
-                                webviewView.webview.postMessage({
-                                    type: 'updateVersionCheck',
-                                    latestVersion: latestVersion
+                        const now = Date.now();
+                        const cacheDuration = 15 * 60 * 1000; // 15 minutes
+
+                        if (!this._cachedLatestVersion || now - this._lastVersionCheckTime > cacheDuration) {
+                            try {
+                                const ghRes = await fetch('https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest', {
+                                    headers: { 'User-Agent': 'Lemonade-VSCode-Extension' }
                                 });
+                                if (ghRes.ok) {
+                                    const ghData = (await ghRes.json()) as any;
+                                    this._cachedLatestVersion = ghData.tag_name;
+                                    this._lastVersionCheckTime = now;
+                                }
+                            } catch (ghErr) {
+                                console.error("Failed to check GitHub version", ghErr);
                             }
-                        } catch (ghErr) {
-                            console.error("Failed to check GitHub version", ghErr);
+                        }
+
+                        if (this._cachedLatestVersion) {
+                            webviewView.webview.postMessage({
+                                type: 'updateVersionCheck',
+                                latestVersion: this._cachedLatestVersion
+                            });
                         }
 
                         // Fetch server_models.json for the pull model dropdown
-                        try {
-                            const modelsRes = await fetch('https://raw.githubusercontent.com/lemonade-sdk/lemonade/refs/heads/main/src/cpp/resources/server_models.json');
-                            if (modelsRes.ok) {
-                                const serverModels = await modelsRes.json();
-                                webviewView.webview.postMessage({
-                                    type: 'serverModelsLoaded',
-                                    models: serverModels
-                                });
+                        if (!this._cachedServerModels || now - this._lastServerModelsCheckTime > cacheDuration) {
+                            try {
+                                const modelsRes = await fetch('https://raw.githubusercontent.com/lemonade-sdk/lemonade/refs/heads/main/src/cpp/resources/server_models.json');
+                                if (modelsRes.ok) {
+                                    this._cachedServerModels = await modelsRes.json();
+                                    this._lastServerModelsCheckTime = now;
+                                }
+                            } catch (err) {
+                                console.error("Failed to fetch server_models.json", err);
                             }
-                        } catch (err) {
-                            console.error("Failed to fetch server_models.json", err);
+                        }
+
+                        if (this._cachedServerModels) {
+                            webviewView.webview.postMessage({
+                                type: 'serverModelsLoaded',
+                                models: this._cachedServerModels
+                            });
                         }
                     } catch (e) {
                         updateStatusBar(false);
