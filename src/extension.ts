@@ -59,7 +59,7 @@ export function getLemonadeConfig() {
     return { rawUrl, apiUrl, headers, defaultTab };
 }
 
-class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
+export class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'lemonadeDashboard';
     private _view?: vscode.WebviewView;
     private _lastLoadedModel: string | null = null;
@@ -189,7 +189,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     }
                     break;
 
-                case 'pullModel':
+                case 'pullModel': {
                     let finalModelName = data.modelName;
                     // If checkpoint or recipe is provided, ensure model name has "user." prefix
                     if ((data.checkpoint || data.recipe) && !finalModelName.startsWith("user.")) {
@@ -272,6 +272,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         vscode.window.showErrorMessage(`Failed to pull ${data.modelName}`);
                     }
                     break;
+                }
 
                 case 'deleteModel':
                     try {
