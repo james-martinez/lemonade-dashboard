@@ -895,8 +895,8 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             if (msg.allModelsLoaded && msg.allModelsLoaded.length > 0) {
                                 const loadedHtml = msg.allModelsLoaded.map(m =>
                                     '<div style="margin-bottom: 6px;">' +
-                                        '<strong>' + escapeHtml(m.model_name) + '</strong> (' + (m.type || '') + ')<br>' +
-                                        '<span style="opacity: 0.7;">Device: ' + (m.device || 'N/A') + ' | Recipe: ' + (m.recipe || 'N/A') + '</span>' +
+                                        '<strong>' + escapeHtml(m.model_name) + '</strong> (' + escapeHtml(m.type || '') + ')<br>' +
+                                        '<span style="opacity: 0.7;">Device: ' + escapeHtml(m.device || 'N/A') + ' | Recipe: ' + escapeHtml(m.recipe || 'N/A') + '</span>' +
                                     '</div>'
                                 ).join('');
                                 document.getElementById('loadedModelsList').innerHTML = loadedHtml;
