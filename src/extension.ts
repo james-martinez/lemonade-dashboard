@@ -22,8 +22,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
 }
 
-export function deactivate() {}
-
 export function updateStatusBar(isConnected: boolean) {
     if (isConnected) {
         statusBarItem.text = '$(check) Lemonade: Connected';
