@@ -3,7 +3,7 @@
   "publisher": "JamesMartinez",
   "displayName": "Lemonade Dashboard",
   "description": "A management dashboard for Lemonade Server",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "repository": {
     "type": "git",
     "url": "https://github.com/james-martinez/lemonade-dashboard.git"
@@ -57,7 +57,10 @@
                 "description": "API Token (LEMONADE_API_KEY) for authentication"
               }
             },
-            "required": ["name", "url"]
+            "required": [
+              "name",
+              "url"
+            ]
           },
           "default": [],
           "description": "A list of Lemonade servers you want to manage."
