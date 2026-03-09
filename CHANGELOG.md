@@ -2,7 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-### 0.0.8 (2026-03-09)
+### [0.0.8](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.7...v0.0.8) (2026-03-09)
+
+
+### Features
+
+* support multiple servers configuration and active server selection via dropdown ([175c5bb](https://github.com/james-martinez/lemonade-dashboard/commit/175c5bb8f56870dd58aa1c3c5e8a2d04c79a7386))
 
 ### [0.0.7](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.6...v0.0.7) (2026-03-07)
 
