@@ -1028,7 +1028,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                             '<div style="font-weight: bold; color: ' + (isCurrent ? 'var(--vscode-textLink-foreground)' : 'inherit') + ';">' + escapeHtml(s.name) + (isCurrent ? ' (Active)' : '') + '</div>' +
                                             '<div style="font-size: 10px; opacity: 0.7;">' + escapeHtml(s.url) + '</div>' +
                                         '</div>' +
-                                        '<vscode-button appearance="icon" onclick="removeServer(' + i + ')" title="Remove Server" style="color: var(--vscode-errorForeground);"><span class="codicon codicon-trash"></span></vscode-button>' +
+                                        '<vscode-button appearance="secondary" onclick="removeServer(' + i + ')" title="Remove Server" style="color: var(--vscode-errorForeground);">Remove</vscode-button>' +
                                     '</div>';
                                 }).join('');
                                 document.getElementById('configuredServersList').innerHTML = listHtml;
@@ -1193,7 +1193,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                             '<div style="font-weight: bold; color: ' + (isCurrent ? 'var(--vscode-textLink-foreground)' : 'inherit') + ';">' + escapeHtml(s.name) + (isCurrent ? ' (Active)' : '') + '</div>' +
                                             '<div style="font-size: 10px; opacity: 0.7;">' + escapeHtml(s.url) + '</div>' +
                                         '</div>' +
-                                        '<vscode-button appearance="icon" onclick="removeServer(' + i + ')" title="Remove Server" style="color: var(--vscode-errorForeground);"><span class="codicon codicon-trash"></span></vscode-button>' +
+                                        '<vscode-button appearance="secondary" onclick="removeServer(' + i + ')" title="Remove Server" style="color: var(--vscode-errorForeground);">Remove</vscode-button>' +
                                     '</div>';
                                 }).join('');
                                 document.getElementById('configuredServersList').innerHTML = listHtml;
