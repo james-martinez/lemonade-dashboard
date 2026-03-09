@@ -39,15 +39,40 @@
     "configuration": {
       "title": "Lemonade Server",
       "properties": {
+        "lemonade.servers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "A friendly name for this server."
+              },
+              "url": {
+                "type": "string",
+                "description": "The full URL of your Lemonade server (e.g., http://127.0.0.1:8000)"
+              },
+              "apiToken": {
+                "type": "string",
+                "description": "API Token (LEMONADE_API_KEY) for authentication"
+              }
+            },
+            "required": ["name", "url"]
+          },
+          "default": [],
+          "description": "A list of Lemonade servers you want to manage."
+        },
         "lemonade.serverUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8000",
-          "description": "The full URL of your Lemonade server (e.g., http://127.0.0.1:8000)"
+          "description": "The full URL of your Lemonade server (e.g., http://127.0.0.1:8000)",
+          "deprecationMessage": "Use lemonade.servers instead."
         },
         "lemonade.apiToken": {
           "type": "string",
           "default": "",
-          "description": "API Token (LEMONADE_API_KEY) for authentication"
+          "description": "API Token (LEMONADE_API_KEY) for authentication",
+          "deprecationMessage": "Use lemonade.servers instead."
         },
         "lemonade.defaultTab": {
           "type": "string",

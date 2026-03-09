@@ -34,10 +34,29 @@ export function updateStatusBar(isConnected: boolean) {
     }
 }
 
-export function getLemonadeConfig() {
+export interface ServerConfig {
+    name: string;
+    url: string;
+    apiToken?: string;
+}
+
+export function getLemonadeConfig(serverIndex: number = 0) {
     const config = vscode.workspace.getConfiguration('lemonade');
-    let rawUrl = config.get<string>('serverUrl') || 'http://127.0.0.1:8000';
-    const token = config.get<string>('apiToken') || '';
+
+    // First try the new 'servers' array config
+    const servers = config.get<ServerConfig[]>('servers');
+    let rawUrl = 'http://127.0.0.1:8000';
+    let token = '';
+
+    if (servers && servers.length > 0 && servers[serverIndex]) {
+        rawUrl = servers[serverIndex].url;
+        token = servers[serverIndex].apiToken || '';
+    } else {
+        // Fallback to legacy config
+        rawUrl = config.get<string>('serverUrl') || 'http://127.0.0.1:8000';
+        token = config.get<string>('apiToken') || '';
+    }
+
     const defaultTab = config.get<string>('defaultTab') || 'main';
 
     rawUrl = rawUrl.trim().replace(/\/+$/, '');
@@ -54,13 +73,14 @@ export function getLemonadeConfig() {
         headers['Authorization'] = `Bearer ${token}`;
     }
 
-    return { rawUrl, apiUrl, headers, defaultTab };
+    return { rawUrl, apiUrl, headers, defaultTab, servers };
 }
 
 class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'lemonadeDashboard';
     private _view?: vscode.WebviewView;
     private _lastLoadedModel: string | null = null;
+    private _activeServerIndex: number = 0;
 
     private _cachedLatestVersion: string | null = null;
     private _lastVersionCheckTime: number = 0;
@@ -80,14 +100,14 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this._getHtmlForWebview();
 
         webviewView.webview.onDidReceiveMessage(async data => {
-            const { rawUrl, apiUrl, headers, defaultTab } = getLemonadeConfig();
+            let { rawUrl, apiUrl, headers, defaultTab, servers } = getLemonadeConfig(this._activeServerIndex);
             
             switch (data.type) {
-                case 'openSettings':
-                    vscode.commands.executeCommand('workbench.action.openSettings', 'lemonade');
-                    break;
-
-
+                case 'switchServer':
+                    this._activeServerIndex = data.index;
+                    ({ rawUrl, apiUrl, headers, defaultTab, servers } = getLemonadeConfig(this._activeServerIndex));
+                    webviewView.webview.postMessage({ type: 'serverSwitched', index: this._activeServerIndex });
+                    // No break, fallthrough to fetch data
                 case 'getDashboardData':
                     try {
                         const liveRes = await fetch(`${rawUrl}/live`, { headers });
@@ -126,7 +146,9 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             allModelsLoaded: healthData.all_models_loaded || [],
                             maxModels: healthData.max_models || {},
                             stats: statsData,
-                            healthData: healthData
+                            healthData: healthData,
+                            servers: servers,
+                            activeServerIndex: this._activeServerIndex
                         });
 
                         // Fetch latest version from GitHub to compare
@@ -180,7 +202,12 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     }
                     break;
 
-                case 'manageModelLifecycle':
+                case 'openSettings':
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'lemonade');
+                    break;
+
+
+                case 'manageModelLifecycle': {
                     try {
                         const endpoint = data.action === 'load' ? '/load' : '/unload';
                         const loadBody: any = {
@@ -207,8 +234,9 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         vscode.window.showErrorMessage(`Failed to ${data.action} model ${data.modelName}.`);
                     }
                     break;
+                }
 
-                case 'pullModel':
+                case 'pullModel': {
                     let finalModelName = data.modelName;
                     // If checkpoint or recipe is provided, ensure model name has "user." prefix
                     if ((data.checkpoint || data.recipe) && !finalModelName.startsWith("user.")) {
@@ -291,6 +319,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         vscode.window.showErrorMessage(`Failed to pull ${data.modelName}`);
                     }
                     break;
+                }
 
                 case 'deleteModel':
                     try {
@@ -471,7 +500,12 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             <div id="statusDot" class="indicator offline"></div>
                             <span id="statusText">Disconnected</span>
                         </div>
-                        <div id="activeModelHeader" style="font-size: 10px; opacity: 0.7; font-weight: normal;">No Model Active</div>
+                        <div id="serverSelectContainer" style="margin-top: 4px; display: none;">
+                            <vscode-dropdown id="serverSelect" onchange="switchServer(this.value)" style="width: auto; min-width: 150px; margin-bottom: 0;">
+                                <vscode-option value="">Default Server</vscode-option>
+                            </vscode-dropdown>
+                        </div>
+                        <div id="activeModelHeader" style="font-size: 10px; opacity: 0.7; font-weight: normal; margin-top: 4px;">No Model Active</div>
                     </div>
                     <vscode-badge id="speedBadge">0 t/s</vscode-badge>
                 </div>
@@ -684,7 +718,8 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
 
                     function requestDashboardData() { vscode.postMessage({ type: 'getDashboardData' }); }
                     function openSettings() { vscode.postMessage({ type: 'openSettings' }); }
-                    
+                    function switchServer(index) { vscode.postMessage({ type: 'switchServer', index: parseInt(index, 10) }); }
+
                     function manageModel(action) {
                         const modelName = document.getElementById('modelSelect').value;
                         const contextSize = document.getElementById('contextSize').value || '4096';
@@ -847,9 +882,38 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     window.addEventListener('message', event => {
                         const msg = event.data;
                         
+                        if (msg.type === 'serverSwitched') {
+                            // Optionally reset UI state here
+                            document.getElementById('loadedModelsList').innerText = 'Loading...';
+                            return;
+                        }
+
                         if (msg.type === 'renderDashboard') {
                             document.getElementById('statusDot').className = 'indicator online';
                             document.getElementById('statusText').innerText = 'Connected';
+
+                            if (msg.servers && msg.servers.length > 0) {
+                                document.getElementById('serverSelectContainer').style.display = 'block';
+                                const select = document.getElementById('serverSelect');
+                                const currentOptions = select.innerHTML;
+                                const newOptions = msg.servers.map((s, i) => {
+                                    if (i === msg.activeServerIndex) {
+                                        return '<vscode-option value="' + i + '" selected>' + escapeHtml(s.name) + '</vscode-option>';
+                                    } else {
+                                        return '<vscode-option value="' + i + '">' + escapeHtml(s.name) + '</vscode-option>';
+                                    }
+                                }).join('');
+
+                                // Only update if options changed to prevent closing dropdown on refresh
+                                if (!select.hasAttribute('data-loaded') || select.getAttribute('data-options') !== newOptions) {
+                                    select.innerHTML = newOptions;
+                                    select.setAttribute('data-loaded', 'true');
+                                    select.setAttribute('data-options', newOptions);
+                                }
+                                select.currentValue = String(msg.activeServerIndex);
+                            } else {
+                                document.getElementById('serverSelectContainer').style.display = 'none';
+                            }
 
                             // Set default tab on first load
                             if (!window.hasSetDefaultTab && msg.defaultTab) {
