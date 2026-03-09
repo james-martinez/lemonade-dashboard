@@ -198,7 +198,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         }
                     } catch (e) {
                         updateStatusBar(false);
-                        webviewView.webview.postMessage({ type: 'serverOffline' });
+                        webviewView.webview.postMessage({ type: 'serverOffline', servers, activeServerIndex: this._activeServerIndex });
                     }
                     break;
 
@@ -438,6 +438,56 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         webviewView.webview.postMessage({ type: 'chatError', error: String(e) });
                     }
                     break;
+
+                case 'addServer':
+                    try {
+                        const config = vscode.workspace.getConfiguration('lemonade');
+                        const currentServers = config.get<ServerConfig[]>('servers') || [];
+                        // Make a copy to avoid readonly errors
+                        const newServers = [...currentServers, { name: data.name, url: data.url, apiToken: data.apiToken || '' }];
+                        await config.update('servers', newServers, vscode.ConfigurationTarget.Global);
+                        vscode.window.showInformationMessage(`Added Lemonade server: ${data.name}`);
+
+                        // If it's the first server, make it active
+                        if (newServers.length === 1) {
+                            this._activeServerIndex = 0;
+                            webviewView.webview.postMessage({ type: 'serverSwitched', index: 0 });
+                        }
+
+                        // The webview already polls every 3 seconds, so we don't need to force
+                        // a refresh from the backend here (and the previous method was a bug anyway).
+                    } catch (e) {
+                        vscode.window.showErrorMessage(`Failed to add server: ${e}`);
+                    }
+                    break;
+
+                case 'removeServer':
+                    try {
+                        const config = vscode.workspace.getConfiguration('lemonade');
+                        const currentServers = config.get<ServerConfig[]>('servers') || [];
+                        if (data.index >= 0 && data.index < currentServers.length) {
+                            const serverName = currentServers[data.index].name;
+                            const newServers = [...currentServers];
+                            newServers.splice(data.index, 1);
+                            await config.update('servers', newServers, vscode.ConfigurationTarget.Global);
+                            vscode.window.showInformationMessage(`Removed Lemonade server: ${serverName}`);
+
+                            // Adjust active server index
+                            if (this._activeServerIndex === data.index) {
+                                this._activeServerIndex = 0;
+                                webviewView.webview.postMessage({ type: 'serverSwitched', index: 0 });
+                            } else if (this._activeServerIndex > data.index) {
+                                this._activeServerIndex--;
+                            }
+                        }
+                    } catch (e) {
+                        vscode.window.showErrorMessage(`Failed to remove server: ${e}`);
+                    }
+                    break;
+
+                case 'showError':
+                    vscode.window.showErrorMessage(data.message);
+                    break;
             }
         });
     }
@@ -517,6 +567,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     <vscode-panel-tab id="tab-library">Library</vscode-panel-tab>
                     <vscode-panel-tab id="tab-backends">Backends</vscode-panel-tab>
                     <vscode-panel-tab id="tab-chat">Chat</vscode-panel-tab>
+                    <vscode-panel-tab id="tab-settings">Settings</vscode-panel-tab>
 
                     <!-- Main Tab: Loaded Models and Last Request Stats -->
                     <vscode-panel-view id="view-main" style="flex-direction: column;">
@@ -710,6 +761,34 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             </div>
                         </div>
                     </vscode-panel-view>
+
+                    <vscode-panel-view id="view-settings" style="flex-direction: column;">
+                        <div class="section">
+                            <h3>Add Server</h3>
+                            <vscode-text-field id="newServerName" placeholder="e.g., Local Server">Server Name</vscode-text-field>
+                            <vscode-text-field id="newServerUrl" placeholder="e.g., http://127.0.0.1:8000">Server URL</vscode-text-field>
+                            <vscode-text-field id="newServerToken" type="password" placeholder="Optional API Token">API Token</vscode-text-field>
+                            <vscode-button appearance="primary" onclick="addServer()">Add Server</vscode-button>
+                        </div>
+
+                        <vscode-divider></vscode-divider>
+
+                        <div class="section">
+                            <h3>Configured Servers</h3>
+                            <div id="configuredServersList" style="font-size: 12px; margin-bottom: 10px;">
+                                Fetching servers...
+                            </div>
+                        </div>
+
+                        <vscode-divider></vscode-divider>
+
+                        <div class="section">
+                            <h3>Workspace Settings</h3>
+                            <div style="display: flex; gap: 10px; flex-direction: column;">
+                                <vscode-button appearance="secondary" onclick="openSettings()">Open VS Code Settings</vscode-button>
+                            </div>
+                        </div>
+                    </vscode-panel-view>
                 </vscode-panels>
 
                 <script>
@@ -719,6 +798,32 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     function requestDashboardData() { vscode.postMessage({ type: 'getDashboardData' }); }
                     function openSettings() { vscode.postMessage({ type: 'openSettings' }); }
                     function switchServer(index) { vscode.postMessage({ type: 'switchServer', index: parseInt(index, 10) }); }
+
+                    function addServer() {
+                        const name = document.getElementById('newServerName').value.trim();
+                        let url = document.getElementById('newServerUrl').value.trim();
+                        const apiToken = document.getElementById('newServerToken').value.trim();
+
+                        if (!name || !url) {
+                            vscode.postMessage({ type: 'showError', message: 'Server Name and URL are required.' });
+                            return;
+                        }
+
+                        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                            url = 'http://' + url;
+                        }
+
+                        vscode.postMessage({ type: 'addServer', name, url, apiToken });
+
+                        // Clear inputs
+                        document.getElementById('newServerName').value = '';
+                        document.getElementById('newServerUrl').value = '';
+                        document.getElementById('newServerToken').value = '';
+                    }
+
+                    function removeServer(index) {
+                        vscode.postMessage({ type: 'removeServer', index: parseInt(index, 10) });
+                    }
 
                     function manageModel(action) {
                         const modelName = document.getElementById('modelSelect').value;
@@ -915,6 +1020,22 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                 document.getElementById('serverSelectContainer').style.display = 'none';
                             }
 
+                            if (msg.servers && msg.servers.length > 0) {
+                                const listHtml = msg.servers.map((s, i) => {
+                                    const isCurrent = i === msg.activeServerIndex;
+                                    return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--vscode-widget-border);">' +
+                                        '<div>' +
+                                            '<div style="font-weight: bold; color: ' + (isCurrent ? 'var(--vscode-textLink-foreground)' : 'inherit') + ';">' + escapeHtml(s.name) + (isCurrent ? ' (Active)' : '') + '</div>' +
+                                            '<div style="font-size: 10px; opacity: 0.7;">' + escapeHtml(s.url) + '</div>' +
+                                        '</div>' +
+                                        '<vscode-button appearance="icon" onclick="removeServer(' + i + ')" title="Remove Server" style="color: var(--vscode-errorForeground);"><span class="codicon codicon-trash"></span></vscode-button>' +
+                                    '</div>';
+                                }).join('');
+                                document.getElementById('configuredServersList').innerHTML = listHtml;
+                            } else {
+                                document.getElementById('configuredServersList').innerHTML = 'No servers configured. Add one above or use the legacy config in VS Code settings.';
+                            }
+
                             // Set default tab on first load
                             if (!window.hasSetDefaultTab && msg.defaultTab) {
                                 const panels = document.getElementById('dashboardPanels');
@@ -1041,6 +1162,44 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         } else if (msg.type === 'serverOffline') {
                             document.getElementById('statusDot').className = 'indicator offline';
                             document.getElementById('statusText').innerHTML = 'Disconnected (<a href="#" style="color: var(--vscode-textLink-foreground);" onclick="openSettings()">Configure</a>)';
+
+                            if (msg.servers && msg.servers.length > 0) {
+                                document.getElementById('serverSelectContainer').style.display = 'block';
+                                const select = document.getElementById('serverSelect');
+                                const currentOptions = select.innerHTML;
+                                const newOptions = msg.servers.map((s, i) => {
+                                    if (i === msg.activeServerIndex) {
+                                        return '<vscode-option value="' + i + '" selected>' + escapeHtml(s.name) + '</vscode-option>';
+                                    } else {
+                                        return '<vscode-option value="' + i + '">' + escapeHtml(s.name) + '</vscode-option>';
+                                    }
+                                }).join('');
+
+                                if (!select.hasAttribute('data-loaded') || select.getAttribute('data-options') !== newOptions) {
+                                    select.innerHTML = newOptions;
+                                    select.setAttribute('data-loaded', 'true');
+                                    select.setAttribute('data-options', newOptions);
+                                }
+                                select.currentValue = String(msg.activeServerIndex);
+                            } else {
+                                document.getElementById('serverSelectContainer').style.display = 'none';
+                            }
+
+                            if (msg.servers && msg.servers.length > 0) {
+                                const listHtml = msg.servers.map((s, i) => {
+                                    const isCurrent = i === msg.activeServerIndex;
+                                    return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--vscode-widget-border);">' +
+                                        '<div>' +
+                                            '<div style="font-weight: bold; color: ' + (isCurrent ? 'var(--vscode-textLink-foreground)' : 'inherit') + ';">' + escapeHtml(s.name) + (isCurrent ? ' (Active)' : '') + '</div>' +
+                                            '<div style="font-size: 10px; opacity: 0.7;">' + escapeHtml(s.url) + '</div>' +
+                                        '</div>' +
+                                        '<vscode-button appearance="icon" onclick="removeServer(' + i + ')" title="Remove Server" style="color: var(--vscode-errorForeground);"><span class="codicon codicon-trash"></span></vscode-button>' +
+                                    '</div>';
+                                }).join('');
+                                document.getElementById('configuredServersList').innerHTML = listHtml;
+                            } else {
+                                document.getElementById('configuredServersList').innerHTML = 'No servers configured. Add one above or use the legacy config in VS Code settings.';
+                            }
                             
                             // Reset all fields
                             document.getElementById('serverVersion').innerText = '-';
