@@ -12,6 +12,16 @@ All notable changes to this project will be documented in this file. See [standa
 * add GUI to manage server configurations ([aebf15b](https://github.com/james-martinez/lemonade-dashboard/commit/aebf15b24dd2152ce2e1ed7a9b623eb49ccdca7e))
 * add GUI to manage server configurations ([44b8c40](https://github.com/james-martinez/lemonade-dashboard/commit/44b8c4005081a27f8fe8df6703c3ecac8fc9672f))
 
+### [0.0.9](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.8...v0.0.9) (2026-03-12)
+
+
+### Features
+
+* add GUI to manage server configurations ([68751db](https://github.com/james-martinez/lemonade-dashboard/commit/68751db394a8d84aff54c19e2f287b57d89ac97f))
+* add GUI to manage server configurations ([6193538](https://github.com/james-martinez/lemonade-dashboard/commit/6193538f9b33d2abe0465a28f693e86822522720))
+* add GUI to manage server configurations ([aebf15b](https://github.com/james-martinez/lemonade-dashboard/commit/aebf15b24dd2152ce2e1ed7a9b623eb49ccdca7e))
+* add GUI to manage server configurations ([44b8c40](https://github.com/james-martinez/lemonade-dashboard/commit/44b8c4005081a27f8fe8df6703c3ecac8fc9672f))
+
 ### [0.0.8](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.7...v0.0.8) (2026-03-09)
 
 
