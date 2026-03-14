@@ -16,7 +16,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('workbench.action.openSettings', 'lemonade');
     }));
 
-    const provider = new LemonadeDashboardProvider(context.extensionUri);
+    const provider = new LemonadeDashboardProvider(context.extensionUri, context);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(LemonadeDashboardProvider.viewType, provider)
     );
@@ -40,7 +40,7 @@ export interface ServerConfig {
     apiToken?: string;
 }
 
-export function getLemonadeConfig(serverIndex: number = 0) {
+export async function getLemonadeConfig(context: vscode.ExtensionContext, serverIndex: number = 0) {
     const config = vscode.workspace.getConfiguration('lemonade');
 
     // First try the new 'servers' array config
@@ -50,11 +50,12 @@ export function getLemonadeConfig(serverIndex: number = 0) {
 
     if (servers && servers.length > 0 && servers[serverIndex]) {
         rawUrl = servers[serverIndex].url;
-        token = servers[serverIndex].apiToken || '';
+        const serverName = servers[serverIndex].name;
+        token = await context.secrets.get(`lemonade.apiToken.${serverName}`) || servers[serverIndex].apiToken || '';
     } else {
         // Fallback to legacy config
         rawUrl = config.get<string>('serverUrl') || 'http://127.0.0.1:8000';
-        token = config.get<string>('apiToken') || '';
+        token = await context.secrets.get('lemonade.apiToken') || config.get<string>('apiToken') || '';
     }
 
     const defaultTab = config.get<string>('defaultTab') || 'main';
@@ -88,7 +89,10 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
     private _cachedServerModels: any = null;
     private _lastServerModelsCheckTime: number = 0;
 
-    constructor(private readonly _extensionUri: vscode.Uri) {}
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+        private readonly _extensionContext: vscode.ExtensionContext
+    ) {}
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -100,12 +104,12 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this._getHtmlForWebview();
 
         webviewView.webview.onDidReceiveMessage(async data => {
-            let { rawUrl, apiUrl, headers, defaultTab, servers } = getLemonadeConfig(this._activeServerIndex);
+            let { rawUrl, apiUrl, headers, defaultTab, servers } = await getLemonadeConfig(this._extensionContext, this._activeServerIndex);
             
             switch (data.type) {
                 case 'switchServer':
                     this._activeServerIndex = data.index;
-                    ({ rawUrl, apiUrl, headers, defaultTab, servers } = getLemonadeConfig(this._activeServerIndex));
+                    ({ rawUrl, apiUrl, headers, defaultTab, servers } = await getLemonadeConfig(this._extensionContext, this._activeServerIndex));
                     webviewView.webview.postMessage({ type: 'serverSwitched', index: this._activeServerIndex });
                     // No break, fallthrough to fetch data
                 case 'getDashboardData':
@@ -444,8 +448,11 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         const config = vscode.workspace.getConfiguration('lemonade');
                         const currentServers = config.get<ServerConfig[]>('servers') || [];
                         // Make a copy to avoid readonly errors
-                        const newServers = [...currentServers, { name: data.name, url: data.url, apiToken: data.apiToken || '' }];
+                        const newServers = [...currentServers, { name: data.name, url: data.url }];
                         await config.update('servers', newServers, vscode.ConfigurationTarget.Global);
+                        if (data.apiToken) {
+                            await this._extensionContext.secrets.store(`lemonade.apiToken.${data.name}`, data.apiToken);
+                        }
                         vscode.window.showInformationMessage(`Added Lemonade server: ${data.name}`);
 
                         // If it's the first server, make it active
@@ -470,6 +477,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             const newServers = [...currentServers];
                             newServers.splice(data.index, 1);
                             await config.update('servers', newServers, vscode.ConfigurationTarget.Global);
+                            await this._extensionContext.secrets.delete(`lemonade.apiToken.${serverName}`);
                             vscode.window.showInformationMessage(`Removed Lemonade server: ${serverName}`);
 
                             // Adjust active server index
