@@ -183,18 +183,21 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
 
                         // Fetch server_models.json for the pull model dropdown
                         if (!this._cachedServerModels || now - this._lastServerModelsCheckTime > cacheDuration) {
-                            try {
-                                const modelsRes = await fetch('https://raw.githubusercontent.com/lemonade-sdk/lemonade/refs/heads/main/src/cpp/resources/server_models.json');
-                                if (modelsRes.ok) {
-                                    this._cachedServerModels = await modelsRes.json();
-                                    this._lastServerModelsCheckTime = now;
-                                }
-                            } catch (err) {
-                                console.error("Failed to fetch server_models.json", err);
-                            }
-                        }
-
-                        if (this._cachedServerModels) {
+                            this._lastServerModelsCheckTime = now;
+                            fetch('https://raw.githubusercontent.com/lemonade-sdk/lemonade/refs/heads/main/src/cpp/resources/server_models.json')
+                                .then(async modelsRes => {
+                                    if (modelsRes.ok) {
+                                        this._cachedServerModels = await modelsRes.json();
+                                        webviewView.webview.postMessage({
+                                            type: 'serverModelsLoaded',
+                                            models: this._cachedServerModels
+                                        });
+                                    }
+                                })
+                                .catch(err => {
+                                    console.error("Failed to fetch server_models.json", err);
+                                });
+                        } else if (this._cachedServerModels) {
                             webviewView.webview.postMessage({
                                 type: 'serverModelsLoaded',
                                 models: this._cachedServerModels
