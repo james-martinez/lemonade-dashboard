@@ -1,16 +1,19 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.target_commitish }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -26,20 +29,38 @@ jobs:
 
       - name: Publish to VS Code Marketplace
         run: npx vsce publish -p ${{ secrets.VSCE_PAT }}
-        if: startsWith(github.ref, 'refs/tags/v')
 
-      - name: Extract Release Notes
-        id: extract_release_notes
+      - name: Upload VSIX to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Extract the content from the first ## header to the next ## header in CHANGELOG.md
-          # This assumes the latest version is at the top.
-          sed -n '/^## /,/^## /p' CHANGELOG.md | sed '$d' > release_notes.md
-        if: startsWith(github.ref, 'refs/tags/v')
+          gh release upload ${{ github.event.release.tag_name }} *.vsix
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          files: "*.vsix"
-          body_path: release_notes.md
-          generate_release_notes: false
+      - name: Update Changelog
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          DATE=$(date +'%Y-%m-%d')
+
+          # Create a temporary file with the new release entry
+          echo "### ${TAG_NAME} (${DATE})" > tmp_entry.md
+          echo "" >> tmp_entry.md
+          printf "%s\n" "$RELEASE_BODY" >> tmp_entry.md
+          echo "" >> tmp_entry.md
+
+          # Insert the new entry before the first version header in CHANGELOG.md
+          awk -v f="tmp_entry.md" '/^###? \[?[0-9v]/ && !inserted { system("cat " f); inserted=1 } {print}' CHANGELOG.md > tmp_changelog.md
+          mv tmp_changelog.md CHANGELOG.md
+          rm tmp_entry.md
+
+      - name: Commit and Push Changelog
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          # Only commit if there are changes
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(release): update changelog for ${{ github.event.release.tag_name }} [skip ci]"
+            git push origin HEAD:${{ github.event.release.target_commitish }}
+          fi
