@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### v0.0.12 (2026-03-22)
+
+## What's Changed
+* fix(release): update package version before publishing extension by @james-martinez in https://github.com/james-martinez/lemonade-dashboard/pull/19
+
+
+**Full Changelog**: https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.11...v0.0.12
+
 ### [0.0.9](https://github.com/james-martinez/lemonade-dashboard/compare/v0.0.8...v0.0.9) (2026-03-12)
 
 
