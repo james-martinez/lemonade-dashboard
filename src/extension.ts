@@ -1101,8 +1101,19 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             }
 
                             const modelOptions = msg.models.map(m => '<vscode-option value="' + escapeHtml(String(m.id)) + '">' + escapeHtml(String(m.id)) + '</vscode-option>').join('') || '<vscode-option value="">No models found</vscode-option>';
-                            document.getElementById('modelSelect').innerHTML = modelOptions;
-                            document.getElementById('deleteSelect').innerHTML = modelOptions;
+                            const modelSelect = document.getElementById('modelSelect');
+                            const deleteSelect = document.getElementById('deleteSelect');
+
+                            if (!modelSelect.hasAttribute('data-options') || modelSelect.getAttribute('data-options') !== modelOptions) {
+                                modelSelect.innerHTML = modelOptions;
+                                deleteSelect.innerHTML = modelOptions;
+                                modelSelect.setAttribute('data-options', modelOptions);
+
+                                // Dispatch change event so parameters load for the initial/single model
+                                setTimeout(() => {
+                                    modelSelect.dispatchEvent(new Event('change'));
+                                }, 0);
+                            }
 
                             // Store model data for populating saved options on selection
                             window.modelDataMap = {};
@@ -1113,38 +1124,40 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             });
 
                             // Update saved model options when model is selected
-                            const modelSelect = document.getElementById('modelSelect');
-                            modelSelect.addEventListener('change', (e) => {
-                                const selectedModelId = e.target.value;
-                                const contextSizeField = document.getElementById('contextSize');
-                                const llamacppArgsField = document.getElementById('llamacppArgs');
-                                const llamacppBackendField = document.getElementById('llamacppBackend');
-                                
-                                if (selectedModelId && window.modelDataMap[selectedModelId]) {
-                                    const options = window.modelDataMap[selectedModelId];
+                            if (!modelSelect.hasAttribute('data-listener-attached')) {
+                                modelSelect.setAttribute('data-listener-attached', 'true');
+                                modelSelect.addEventListener('change', (e) => {
+                                    const selectedModelId = e.target.value;
+                                    const contextSizeField = document.getElementById('contextSize');
+                                    const llamacppArgsField = document.getElementById('llamacppArgs');
+                                    const llamacppBackendField = document.getElementById('llamacppBackend');
                                     
-                                    // Populate text fields with saved values
-                                    if (options.ctx_size) {
-                                        contextSizeField.value = String(options.ctx_size);
+                                    if (selectedModelId && window.modelDataMap[selectedModelId]) {
+                                        const options = window.modelDataMap[selectedModelId];
+
+                                        // Populate text fields with saved values
+                                        if (options.ctx_size) {
+                                            contextSizeField.value = String(options.ctx_size);
+                                        } else {
+                                            contextSizeField.value = '';
+                                        }
+                                        if (options.llamacpp_args) {
+                                            llamacppArgsField.value = options.llamacpp_args;
+                                        } else {
+                                            llamacppArgsField.value = '';
+                                        }
+                                        if (options.llamacpp_backend) {
+                                            llamacppBackendField.value = options.llamacpp_backend;
+                                        } else {
+                                            llamacppBackendField.value = '';
+                                        }
                                     } else {
                                         contextSizeField.value = '';
-                                    }
-                                    if (options.llamacpp_args) {
-                                        llamacppArgsField.value = options.llamacpp_args;
-                                    } else {
                                         llamacppArgsField.value = '';
-                                    }
-                                    if (options.llamacpp_backend) {
-                                        llamacppBackendField.value = options.llamacpp_backend;
-                                    } else {
                                         llamacppBackendField.value = '';
                                     }
-                                } else {
-                                    contextSizeField.value = '';
-                                    llamacppArgsField.value = '';
-                                    llamacppBackendField.value = '';
-                                }
-                            });
+                                });
+                            }
 
                             if (msg.sysInfo) {
                                 document.getElementById('cpuText').innerText = msg.sysInfo['Processor'] || 'Unknown CPU';
