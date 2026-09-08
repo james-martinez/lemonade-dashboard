@@ -77,6 +77,28 @@ export async function getLemonadeConfig(context: vscode.ExtensionContext, server
     return { rawUrl, apiUrl, headers, defaultTab, servers };
 }
 
+// Extract a human-readable error message from a failed Lemonade API response.
+// Server errors use either { "error": { "message": ... } } or { "error": "..." }.
+async function getServerErrorMessage(res: Response, fallback: string): Promise<string> {
+    try {
+        const text = await res.text();
+        try {
+            const parsed = JSON.parse(text) as any;
+            if (parsed && typeof parsed === 'object') {
+                const err = parsed.error;
+                if (typeof err === 'string' && err) return err;
+                if (err && typeof err === 'object' && err.message) return String(err.message);
+            }
+        } catch {
+            // Not JSON, fall through to raw text
+        }
+        if (text && text.length <= 300) return text;
+    } catch {
+        // Body unreadable, fall through to fallback
+    }
+    return `${fallback} (HTTP ${res.status})`;
+}
+
 class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'lemonadeDashboard';
     private _view?: vscode.WebviewView;
@@ -117,11 +139,12 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         const liveRes = await fetch(`${rawUrl}/live`, { headers });
                         if (!liveRes.ok) throw new Error("Server not live");
 
-                        const [sysRes, modelsRes, healthRes, statsRes] = await Promise.all([
+                        const [sysRes, modelsRes, healthRes, statsRes, downloadsRes] = await Promise.all([
                             fetch(`${apiUrl}/system-info`, { headers }),
                             fetch(`${apiUrl}/models`, { headers }),
                             fetch(`${apiUrl}/health`, { headers }),
-                            fetch(`${apiUrl}/stats`, { headers })
+                            fetch(`${apiUrl}/stats`, { headers }),
+                            fetch(`${apiUrl}/downloads`, { headers })
                         ]);
 
                         updateStatusBar(true);
@@ -138,6 +161,16 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             statsData = (await statsRes.json()) as any;
                         }
 
+                        let downloadsData: any = [];
+                        if (downloadsRes.ok) {
+                            try {
+                                downloadsData = (await downloadsRes.json()) as any;
+                                if (!Array.isArray(downloadsData)) downloadsData = [];
+                            } catch {
+                                downloadsData = [];
+                            }
+                        }
+
                         webviewView.webview.postMessage({
                             type: 'renderDashboard',
                             defaultTab: defaultTab,
@@ -150,6 +183,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             allModelsLoaded: healthData.all_models_loaded || [],
                             maxModels: healthData.max_models || {},
                             stats: statsData,
+                            downloads: downloadsData,
                             healthData: healthData,
                             servers: servers,
                             activeServerIndex: this._activeServerIndex
@@ -209,6 +243,46 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     }
                     break;
 
+                case 'checkModelUpdates':
+                    try {
+                        const res = await fetch(`${apiUrl}/models/check-updates`, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({})
+                        });
+                        const payload = (await res.json().catch(() => ({}))) as any;
+                        if (!res.ok) {
+                            const message = (payload && (payload.error?.message || payload.error)) || `Check failed (HTTP ${res.status})`;
+                            webviewView.webview.postMessage({ type: 'modelUpdateResult', error: message });
+                        } else {
+                            webviewView.webview.postMessage({
+                                type: 'modelUpdateResult',
+                                status: payload.status || 'success',
+                                updatesAvailable: payload.updates_available ?? 0,
+                                models: payload.models || [],
+                                failedModels: payload.failed_models || []
+                            });
+                        }
+                    } catch (e) {
+                        webviewView.webview.postMessage({ type: 'modelUpdateResult', error: String(e) });
+                    }
+                    break;
+
+                case 'cancelDownload':
+                    try {
+                        const res = await fetch(`${apiUrl}/downloads/control`, {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ id: data.id, action: 'cancel' })
+                        });
+                        if (!res.ok) {
+                            vscode.window.showErrorMessage(await getServerErrorMessage(res, `Failed to cancel download (HTTP ${res.status})`));
+                        }
+                    } catch (e) {
+                        vscode.window.showErrorMessage(`Failed to cancel download: ${e}`);
+                    }
+                    break;
+
                 case 'openSettings':
                     vscode.commands.executeCommand('workbench.action.openSettings', 'lemonade');
                     break;
@@ -218,9 +292,14 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                     try {
                         const endpoint = data.action === 'load' ? '/load' : '/unload';
                         const loadBody: any = {
-                            model_name: data.modelName,
-                            ctx_size: data.contextSize || 4096
+                            model_name: data.modelName
                         };
+                        // Omitted options keep saved values on the server (RecipeOptions
+                        // treats an absent key as "keep saved value"), so only send
+                        // ctx_size when the user actually entered one.
+                        if (data.contextSize !== undefined && data.contextSize !== null && data.contextSize !== '') {
+                            loadBody.ctx_size = data.contextSize;
+                        }
                         if (data.llamacppArgs) {
                             loadBody.llamacpp_args = data.llamacppArgs;
                         }
@@ -235,7 +314,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             headers,
                             body: JSON.stringify(loadBody)
                         });
-                        if (!res.ok) throw new Error("Action failed");
+                        if (!res.ok) throw new Error(await getServerErrorMessage(res, `Failed to ${data.action} model ${data.modelName}`));
                         vscode.window.showInformationMessage(`Successfully ${data.action}ed ${data.modelName}`);
                     } catch (e) {
                         vscode.window.showErrorMessage(`Failed to ${data.action} model ${data.modelName}.`);
@@ -260,13 +339,18 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                         if (data.reasoning) pullBody.reasoning = true;
                         if (data.embedding) pullBody.embedding = true;
                         if (data.reranking) pullBody.reranking = true;
+                        // handle_pull reads `stream` from the JSON body; the query
+                        // parameter is ignored, and without it the pull takes the
+                        // synchronous path and no SSE progress events are emitted.
+                        pullBody.stream = true;
 
-                        const res = await fetch(`${apiUrl}/pull?stream=true`, {
+                        const res = await fetch(`${apiUrl}/pull`, {
                             method: 'POST',
                             headers,
                             body: JSON.stringify(pullBody)
                         });
-                        if (!res.ok || !res.body) throw new Error("Pull failed");
+                        if (!res.ok) throw new Error(await getServerErrorMessage(res, `Failed to pull ${data.modelName}`));
+                        if (!res.body) throw new Error("Pull failed: no response body");
                 
                         const reader = res.body.getReader();
                         const decoder = new TextDecoder();
@@ -281,7 +365,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             buffer = events.pop() || '';
                 
                             for (const evt of events) {
-                                if (evt.includes('event: progress')) {
+                                if (evt.startsWith('event: progress')) {
                                     const dataLine = evt.split('\n').find(l => l.startsWith('data:'));
                                     if (dataLine) {
                                         try {
@@ -297,13 +381,13 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                             console.error("Error parsing progress event", e);
                                         }
                                     }
-                                } else if (evt.includes('event: complete')) {
+                                } else if (evt.startsWith('event: complete')) {
                                     webviewView.webview.postMessage({
                                         type: 'pullProgress',
                                         status: 'complete',
                                         model: data.modelName
                                     });
-                                } else if (evt.includes('event: error')) {
+                                } else if (evt.startsWith('event: error')) {
                                     const dataLine = evt.split('\n').find(l => l.startsWith('data:'));
                                     if (dataLine) {
                                         try {
@@ -335,7 +419,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             headers,
                             body: JSON.stringify({ model_name: data.modelName })
                         });
-                        if (!res.ok) throw new Error("Delete failed");
+                        if (!res.ok) throw new Error(await getServerErrorMessage(res, `Failed to delete ${data.modelName}`));
                         vscode.window.showInformationMessage(`Deleted ${data.modelName}`);
                     } catch (e) {
                         vscode.window.showErrorMessage(`Failed to delete ${data.modelName}`);
@@ -353,7 +437,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                 backend: data.backendName
                             })
                         });
-                        if (!res.ok) throw new Error("Install failed");
+                        if (!res.ok) throw new Error(await getServerErrorMessage(res, `Failed to install ${data.recipeName}:${data.backendName}`));
                         vscode.window.showInformationMessage(`Successfully installed ${data.recipeName}:${data.backendName}`);
                     } catch (e) {
                         vscode.window.showErrorMessage(`Failed to install ${data.recipeName}:${data.backendName}`);
@@ -370,7 +454,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                 backend: data.backendName
                             })
                         });
-                        if (!res.ok) throw new Error("Uninstall failed");
+                        if (!res.ok) throw new Error(await getServerErrorMessage(res, `Failed to uninstall ${data.recipeName}:${data.backendName}`));
                         vscode.window.showInformationMessage(`Uninstalled ${data.recipeName}:${data.backendName}`);
                     } catch (e) {
                         vscode.window.showErrorMessage(`${e}`);
@@ -397,13 +481,13 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             method: 'POST',
                             headers,
                             body: JSON.stringify({
-                                model: this._lastLoadedModel,
+                                model: data.model || this._lastLoadedModel,
                                 messages: data.messages,
                                 stream: true
                             })
                         });
 
-                        if (!res.ok) throw new Error("Chat request failed");
+                        if (!res.ok) throw new Error(await getServerErrorMessage(res, 'Chat request failed'));
                         if (!res.body) throw new Error("No response body");
 
                         const reader = res.body.getReader();
@@ -617,7 +701,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             <div class="metric"><span class="metric-label">Input Tokens</span><span id="inputTokens" class="metric-value">0</span></div>
                             <div class="metric"><span class="metric-label">Output Tokens</span><span id="outputTokens" class="metric-value">0</span></div>
                             <div class="metric"><span class="metric-label">Prompt Tokens</span><span id="promptTokens" class="metric-value">0</span></div>
-                            <div class="metric"><span class="metric-label">Decode Times</span><span id="decodeTimes" class="metric-value">-</span></div>
+                            <div class="metric"><span class="metric-label">Cached Tokens</span><span id="cacheTokens" class="metric-value">-</span></div>
                         </div>
 
                         <vscode-divider></vscode-divider>
@@ -641,6 +725,13 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                 </div>
                             </div>
                             <div class="metric"><span class="metric-label">WebSocket Port</span><span id="wsPort" class="metric-value">-</span></div>
+                        </div>
+
+                        <div class="section">
+                            <h3>Model Updates</h3>
+                            <p style="font-size: 11px; margin-bottom: 8px; opacity: 0.8;">Check the local model registry against the upstream catalog.</p>
+                            <vscode-button appearance="secondary" onclick="modelUpdatesChecked()">Check for Model Updates</vscode-button>
+                            <div id="modelUpdateStatus" style="font-size: 12px; margin-top: 8px;"></div>
                         </div>
 
                         <div class="section">
@@ -716,6 +807,11 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             </div>
 
                             <vscode-button appearance="primary" id="pullBtn" onclick="pullModel()">Pull Model</vscode-button>
+                        </div>
+
+                        <div class="section">
+                            <h3>Downloads in Progress</h3>
+                            <div id="downloadsList" style="font-size: 12px;">None active</div>
                         </div>
 
                         <vscode-divider></vscode-divider>
@@ -805,9 +901,136 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                 <script>
                     const vscode = acquireVsCodeApi();
                     let availableServerModels = {};
+                    let lastModelOptionsHtml = '';
 
                     function requestDashboardData() { vscode.postMessage({ type: 'getDashboardData' }); }
+                    function modelUpdatesChecked() { vscode.postMessage({ type: 'checkModelUpdates' }); }
                     function openSettings() { vscode.postMessage({ type: 'openSettings' }); }
+
+                    function setDropdownOptions(el, html) {
+                        if (el.getAttribute('data-options') !== html) {
+                            el.innerHTML = html;
+                            el.setAttribute('data-loaded', 'true');
+                            el.setAttribute('data-options', html);
+                        }
+                    }
+
+                    // Attach the saved-options listener exactly once, at init.
+                    // renderDashboard re-runs every 3s but this closure reads
+                    // window.modelDataMap, which the render keeps up to date.
+                    const modelSelectEl = document.getElementById('modelSelect');
+                    modelSelectEl.addEventListener('change', (e) => {
+                        const selectedModelId = e.target.value;
+                        const contextSizeField = document.getElementById('contextSize');
+                        const llamacppArgsField = document.getElementById('llamacppArgs');
+                        const llamacppBackendField = document.getElementById('llamacppBackend');
+
+                        if (selectedModelId && window.modelDataMap && window.modelDataMap[selectedModelId]) {
+                            const options = window.modelDataMap[selectedModelId];
+
+                            // Populate text fields with saved values
+                            if (options.ctx_size) {
+                                contextSizeField.value = String(options.ctx_size);
+                            } else {
+                                contextSizeField.value = '';
+                            }
+                            if (options.llamacpp_args) {
+                                llamacppArgsField.value = options.llamacpp_args;
+                            } else {
+                                llamacppArgsField.value = '';
+                            }
+                            if (options.llamacpp_backend) {
+                                llamacppBackendField.value = options.llamacpp_backend;
+                            } else {
+                                llamacppBackendField.value = '';
+                            }
+                        } else {
+                            contextSizeField.value = '';
+                            llamacppArgsField.value = '';
+                            llamacppBackendField.value = '';
+                        }
+                    });
+
+                    // Same pattern for the pre-configured pull-model dropdown.
+                    const serverModelSelectEl = document.getElementById('serverModelSelect');
+                    serverModelSelectEl.addEventListener('change', (e) => {
+                        const selectedName = e.target.value;
+                        if (selectedName && availableServerModels[selectedName]) {
+                            const model = availableServerModels[selectedName];
+                            document.getElementById('pullInput').value = selectedName;
+
+                            // Handle single checkpoint string or checkpoints object
+                            if (typeof model.checkpoint === 'string') {
+                                document.getElementById('pullCheckpoint').value = model.checkpoint;
+                            } else if (model.checkpoints && model.checkpoints.main) {
+                                document.getElementById('pullCheckpoint').value = model.checkpoints.main;
+                            } else {
+                                document.getElementById('pullCheckpoint').value = '';
+                            }
+
+                            document.getElementById('pullRecipe').value = model.recipe || '';
+
+                            // Reset checkboxes
+                            document.getElementById('pullVision').checked = false;
+                            document.getElementById('pullReasoning').checked = false;
+                            document.getElementById('pullEmbedding').checked = false;
+                            document.getElementById('pullReranking').checked = false;
+
+                            // Set labels
+                            if (model.labels) {
+                                if (model.labels.includes('vision')) document.getElementById('pullVision').checked = true;
+                                if (model.labels.includes('reasoning')) document.getElementById('pullReasoning').checked = true;
+                                if (model.labels.includes('embeddings')) document.getElementById('pullEmbedding').checked = true;
+                                if (model.labels.includes('reranking')) document.getElementById('pullReranking').checked = true;
+                            }
+                        }
+                    });
+
+                    function renderDownloads(downloads) {
+                        const el = document.getElementById('downloadsList');
+                        if (!el) return;
+                        if (!downloads || downloads.length === 0) {
+                            el.innerHTML = '<span style="opacity: 0.7;">None active</span>';
+                            return;
+                        }
+                        el.innerHTML = downloads.map(d => {
+                            const pct = (d.percent != null) ? Math.round(d.percent) + '%' : '-';
+                            const status = d.status || 'unknown';
+                            const running = (status === 'running' || status === 'downloading' || status === 'pending');
+                            const name = d.model_name || d.model || d.id || 'download';
+                            const cancelBtn = (running && d.id)
+                                ? ' <vscode-button appearance="secondary" style="margin-left: 8px; color: var(--vscode-errorForeground);" onclick="cancelDownload(' + d.id + ')">Cancel</vscode-button>'
+                                : '';
+                            return '<div style="margin-bottom: 6px;">' +
+                                '<strong>' + escapeHtml(name) + '</strong> &middot; ' + pct + ' &middot; ' + escapeHtml(status) +
+                                cancelBtn +
+                                '</div>';
+                        }).join('');
+                    }
+
+                    function renderModelUpdateResult(msg) {
+                        const el = document.getElementById('modelUpdateStatus');
+                        if (!el) return;
+                        if (msg.error) {
+                            el.style.color = 'var(--vscode-errorForeground)';
+                            el.innerText = 'Error: ' + msg.error;
+                            return;
+                        }
+                        const n = msg.updatesAvailable || 0;
+                        if (msg.status === 'success' && n > 0) {
+                            el.style.color = 'var(--vscode-testing-iconFailed)';
+                            el.innerHTML = n + ' model update(s) available: ' + msg.models.map(m => escapeHtml(typeof m === 'string' ? m : (m.id || m.model || 'unknown'))).join(', ');
+                        } else if (msg.status === 'failed') {
+                            el.style.color = 'var(--vscode-errorForeground)';
+                            el.innerText = 'Check failed for: ' + (msg.failedModels || []).map(m => escapeHtml(typeof m === 'string' ? m : (m.id || m.model || 'unknown'))).join(', ');
+                        } else {
+                            el.style.color = 'var(--vscode-testing-iconPassed)';
+                            el.innerText = 'All models up to date';
+                        }
+                    }
+
+                    function cancelDownload(id) { vscode.postMessage({ type: 'cancelDownload', id }); }
+
                     function switchServer(index) { vscode.postMessage({ type: 'switchServer', index: parseInt(index, 10) }); }
 
                     function addServer() {
@@ -1071,11 +1294,11 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             document.getElementById('inputTokens').innerText = String(msg.stats?.input_tokens || 0);
                             document.getElementById('outputTokens').innerText = String(msg.stats?.output_tokens || 0);
                             document.getElementById('promptTokens').innerText = String(msg.stats?.prompt_tokens || 0);
-                            
-                            const decodeTimes = msg.stats?.decode_token_times;
-                            document.getElementById('decodeTimes').innerText = decodeTimes && decodeTimes.length > 0
-                                ? decodeTimes.map(t => t.toFixed(3)).join(', ')
-                                : '-';
+
+                            // /stats emits cache_tokens (cached prompt tokens); -1/null means
+                            // no cache data for the last request.
+                            const cacheTokens = msg.stats?.cache_tokens;
+                            document.getElementById('cacheTokens').innerText = (cacheTokens == null || cacheTokens < 0) ? '-' : String(cacheTokens);
 
                             // Model limits
                             if (msg.maxModels) {
@@ -1112,39 +1335,16 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                 }
                             });
 
-                            // Update saved model options when model is selected
-                            const modelSelect = document.getElementById('modelSelect');
-                            modelSelect.addEventListener('change', (e) => {
-                                const selectedModelId = e.target.value;
-                                const contextSizeField = document.getElementById('contextSize');
-                                const llamacppArgsField = document.getElementById('llamacppArgs');
-                                const llamacppBackendField = document.getElementById('llamacppBackend');
-                                
-                                if (selectedModelId && window.modelDataMap[selectedModelId]) {
-                                    const options = window.modelDataMap[selectedModelId];
-                                    
-                                    // Populate text fields with saved values
-                                    if (options.ctx_size) {
-                                        contextSizeField.value = String(options.ctx_size);
-                                    } else {
-                                        contextSizeField.value = '';
-                                    }
-                                    if (options.llamacpp_args) {
-                                        llamacppArgsField.value = options.llamacpp_args;
-                                    } else {
-                                        llamacppArgsField.value = '';
-                                    }
-                                    if (options.llamacpp_backend) {
-                                        llamacppBackendField.value = options.llamacpp_backend;
-                                    } else {
-                                        llamacppBackendField.value = '';
-                                    }
-                                } else {
-                                    contextSizeField.value = '';
-                                    llamacppArgsField.value = '';
-                                    llamacppBackendField.value = '';
-                                }
-                            });
+                            // Rebuild the load/delete dropdowns only when the option set
+                            // actually changes, so the user's current selection is not
+                            // reset on every 3s poll. The saved-options change handler
+                            // is attached once at init and reads window.modelDataMap.
+                            lastModelOptionsHtml = msg.models.map(m => '<vscode-option value="' + escapeHtml(String(m.id)) + '">' + escapeHtml(String(m.id)) + '</vscode-option>').join('') || '<vscode-option value="">No models found</vscode-option>';
+                            setDropdownOptions(document.getElementById('modelSelect'), lastModelOptionsHtml);
+                            setDropdownOptions(document.getElementById('deleteSelect'), lastModelOptionsHtml);
+
+                            // Downloads in progress
+                            renderDownloads(msg.downloads);
 
                             if (msg.sysInfo) {
                                 document.getElementById('cpuText').innerText = msg.sysInfo['Processor'] || 'Unknown CPU';
@@ -1222,7 +1422,7 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             document.getElementById('inputTokens').innerText = '0';
                             document.getElementById('outputTokens').innerText = '0';
                             document.getElementById('promptTokens').innerText = '0';
-                            document.getElementById('decodeTimes').innerText = '-';
+                            document.getElementById('cacheTokens').innerText = '-';
                             document.getElementById('maxLlm').innerText = '-';
                             document.getElementById('maxEmbedding').innerText = '-';
                             document.getElementById('maxReranking').innerText = '-';
@@ -1230,7 +1430,6 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             document.getElementById('maxImage').innerText = '-';
                             document.getElementById('maxTts').innerText = '-';
                             document.getElementById('loadedModelsList').innerText = 'No models loaded';
-                            document.getElementById('savedModelOptions').innerText = 'No saved options';
                             document.getElementById('cpuText').innerText = '-';
                             document.getElementById('ramText').innerText = '-';
                             document.getElementById('osVersion').innerText = '-';
@@ -1241,8 +1440,11 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                             document.getElementById('npuText').innerText = '-';
                             
                             document.getElementById('modelSelect').innerHTML = '<vscode-option value="">Fetching...</vscode-option>';
+                            document.getElementById('modelSelect').removeAttribute('data-options');
                             document.getElementById('deleteSelect').innerHTML = '<vscode-option value="">Fetching...</vscode-option>';
+                            document.getElementById('deleteSelect').removeAttribute('data-options');
                             document.getElementById('recipeContainer').innerHTML = 'Offline';
+                            renderDownloads([]);
                             
                             document.getElementById('healthJson').innerText = JSON.stringify(msg.healthData || {}, null, 2);
                         } else if (msg.type === 'pullProgress') {
@@ -1330,41 +1532,14 @@ class LemonadeDashboardProvider implements vscode.WebviewViewProvider {
                                 const options = Object.keys(availableServerModels).map(name =>
                                     '<vscode-option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</vscode-option>'
                                 ).join('');
-                                select.innerHTML = '<vscode-option value="">Select a pre-configured model...</vscode-option>' + options;
-                                
-                                select.addEventListener('change', (e) => {
-                                    const selectedName = e.target.value;
-                                    if (selectedName && availableServerModels[selectedName]) {
-                                        const model = availableServerModels[selectedName];
-                                        document.getElementById('pullInput').value = selectedName;
-                                        
-                                        // Handle single checkpoint string or checkpoints object
-                                        if (typeof model.checkpoint === 'string') {
-                                            document.getElementById('pullCheckpoint').value = model.checkpoint;
-                                        } else if (model.checkpoints && model.checkpoints.main) {
-                                            document.getElementById('pullCheckpoint').value = model.checkpoints.main;
-                                        } else {
-                                            document.getElementById('pullCheckpoint').value = '';
-                                        }
-
-                                        document.getElementById('pullRecipe').value = model.recipe || '';
-                                        
-                                        // Reset checkboxes
-                                        document.getElementById('pullVision').checked = false;
-                                        document.getElementById('pullReasoning').checked = false;
-                                        document.getElementById('pullEmbedding').checked = false;
-                                        document.getElementById('pullReranking').checked = false;
-
-                                        // Set labels
-                                        if (model.labels) {
-                                            if (model.labels.includes('vision')) document.getElementById('pullVision').checked = true;
-                                            if (model.labels.includes('reasoning')) document.getElementById('pullReasoning').checked = true;
-                                            if (model.labels.includes('embeddings')) document.getElementById('pullEmbedding').checked = true;
-                                            if (model.labels.includes('reranking')) document.getElementById('pullReranking').checked = true;
-                                        }
-                                    }
-                                });
+                                // Only rewrite when the catalog changes: this message is
+                                // re-posted every 3s tick while cached, and rewriting
+                                // innerHTML resets the user's selection. The change
+                                // handler is attached once at init.
+                                setDropdownOptions(select, '<vscode-option value="">Select a pre-configured model...</vscode-option>' + options);
                             }
+                        } else if (msg.type === 'modelUpdateResult') {
+                            renderModelUpdateResult(msg);
                         }
                     });
                     
