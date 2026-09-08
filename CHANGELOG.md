@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### v0.0.13 (2026-09-08)
+
+## What's Changed
+* fix(pull): send `stream: true` in the JSON body so SSE pull progress events are emitted (the `?stream=true` query param was ignored and every pull ran synchronously)
+* fix(dashboard): attach model dropdown change handlers once at init instead of every 3s poll (unbounded listener leak); only rewrite model dropdowns when the option set changes so the selection no longer resets mid-interaction
+* fix(chat): honor the webview-selected model instead of always using the last-loaded model
+* fix(load): only send `ctx_size` when the user entered one, so an omitted option keeps the saved value instead of force-writing 4096 over saved/auto
+* fix(errors): surface the server's structured error message from load/unload, pull, delete, install/uninstall, and chat instead of generic "Action failed" toasts
+* fix(stats): replace the dead "Decode Times" row (not in the /stats payload) with the real `cache_tokens` field
+* fix(offline): remove the null-ref on the nonexistent `savedModelOptions` element that aborted the offline handler
+* feat(library): add "Downloads in Progress" panel polled from `GET /v1/downloads` with per-download cancel via `/v1/downloads/control`
+* feat(system): add "Check for Model Updates" button backed by `POST /v1/models/check-updates`
+
+Full list of changes in https://github.com/james-martinez/lemonade-dashboard/pull/21
+
 ### v0.0.12 (2026-03-22)
 
 ## What's Changed
